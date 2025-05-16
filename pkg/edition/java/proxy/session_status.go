@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"gate/pkg/edition/java/netmc"
-	"gate/pkg/edition/java/ping"
-	"gate/pkg/edition/java/proto/packet"
-	"gate/pkg/edition/java/proto/version"
-	"gate/pkg/gate/proto"
 	"gate/pkg/util/errs"
+	"go.minekube.com/gate/pkg/edition/java/netmc"
+	"go.minekube.com/gate/pkg/edition/java/ping"
+	"go.minekube.com/gate/pkg/edition/java/proto/packet"
+	"go.minekube.com/gate/pkg/edition/java/proto/version"
+	"go.minekube.com/gate/pkg/gate/proto"
 
 	"github.com/go-logr/logr"
 )
@@ -44,17 +44,6 @@ func newStatusSessionHandler(
 			"protocol", conn.Protocol()),
 		resolvePingResponse: pingResolveFunc,
 	}
-}
-
-func (h *statusSessionHandler) Activated() {
-	cfg := h.config()
-	var log logr.Logger
-	if cfg.Status.LogPingRequests || cfg.Debug {
-		log = h.log
-	} else {
-		log = h.log.V(1)
-	}
-	log.Info("got server list status request")
 }
 
 func (h *statusSessionHandler) HandlePacket(pc *proto.PacketContext) {

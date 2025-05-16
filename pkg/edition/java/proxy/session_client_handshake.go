@@ -2,19 +2,18 @@ package proxy
 
 import (
 	"fmt"
+	"gate/pkg/internal/addrquota"
 	"net"
 	"time"
 
 	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
 
 	"gate/pkg/edition/java/config"
-	"gate/pkg/edition/java/internal/addrquota"
-	"gate/pkg/edition/java/lite"
-	"gate/pkg/edition/java/netmc"
-	"gate/pkg/edition/java/proto/packet"
-	"gate/pkg/edition/java/proto/state"
-	"gate/pkg/gate/proto"
 	"gate/pkg/util/netutil"
+	"go.minekube.com/gate/pkg/edition/java/netmc"
+	"go.minekube.com/gate/pkg/edition/java/proto/packet"
+	"go.minekube.com/gate/pkg/edition/java/proto/state"
+	"go.minekube.com/gate/pkg/gate/proto"
 
 	"github.com/go-logr/logr"
 	"github.com/robinbraemer/event"
@@ -91,12 +90,12 @@ func (h *handshakeSessionHandler) handleHandshake(handshake *packet.Handshake, p
 		dialTimeout := time.Duration(h.config().ConnectionTimeout)
 		if nextState == state.Login {
 			// Lite mode enabled, pipe the connection.
-			lite.Forward(dialTimeout, h.config().Lite.Routes, h.log, h.conn, handshake, pc)
+			Forward(dialTimeout, h.config().Lite.Routes, h.log, h.conn, handshake, pc)
 			return
 		}
 		// Resolve ping response for lite mode.
 		resolvePingResponse = func(log logr.Logger, statusRequestCtx *proto.PacketContext) (logr.Logger, *packet.StatusResponse, error) {
-			return lite.ResolveStatusResponse(dialTimeout, h.config().Lite.Routes, log, h.conn, handshake, pc, statusRequestCtx)
+			return ResolveStatusResponse(dialTimeout, h.config().Lite.Routes, log, h.conn, handshake, pc, statusRequestCtx)
 		}
 	}
 

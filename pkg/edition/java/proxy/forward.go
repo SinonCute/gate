@@ -1,4 +1,4 @@
-package lite
+package proxy
 
 import (
 	"bytes"
@@ -6,21 +6,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gate/pkg/edition/java/internal/protoutil"
+	"gate/pkg/gate/db"
+	"gate/pkg/gate/types"
+	"gate/pkg/util/forwardutil"
+	"go.minekube.com/gate/pkg/edition/java/lite/config"
 	"io"
 	"net"
 	"strings"
 	"time"
 
-	"gate/pkg/edition/java/internal/protoutil"
-	"gate/pkg/edition/java/lite/config"
-	"gate/pkg/edition/java/netmc"
-	"gate/pkg/edition/java/proto/codec"
-	"gate/pkg/edition/java/proto/packet"
-	"gate/pkg/edition/java/proto/state"
-	"gate/pkg/edition/java/proto/util"
-	"gate/pkg/gate/proto"
 	"gate/pkg/util/errs"
 	"gate/pkg/util/netutil"
+	"go.minekube.com/gate/pkg/edition/java/netmc"
+	"go.minekube.com/gate/pkg/edition/java/proto/codec"
+	"go.minekube.com/gate/pkg/edition/java/proto/packet"
+	"go.minekube.com/gate/pkg/edition/java/proto/state"
+	"go.minekube.com/gate/pkg/edition/java/proto/util"
+	"go.minekube.com/gate/pkg/gate/proto"
 
 	"github.com/go-logr/logr"
 	"github.com/jellydator/ttlcache/v3"
@@ -30,7 +33,7 @@ import (
 // Forward forwards a client connection to a matching backend route.
 func Forward(
 	dialTimeout time.Duration,
-	routes []config.Route,
+	dynCfg *types.DynamicConfig,
 	log logr.Logger,
 	client netmc.MinecraftConn,
 	handshake *packet.Handshake,
@@ -38,17 +41,18 @@ func Forward(
 ) {
 	defer func() { _ = client.Close() }()
 
-	log, src, route, nextBackend, err := findRoute(routes, log, client, handshake)
+	backendAddr, log, src, route, err := findRoute(dynCfg, log, client, handshake)
 	if err != nil {
 		errs.V(log, err).Info("failed to find route", "error", err)
 		return
 	}
 
-	// Find a backend to dial successfully.
-	log, dst, err := tryBackends(nextBackend, func(log logr.Logger, backendAddr string) (logr.Logger, net.Conn, error) {
-		conn, err := dialRoute(client.Context(), dialTimeout, src.RemoteAddr(), route, backendAddr, handshake, pc, false)
-		return log, conn, err
-	})
+	// Dial the backend directly
+	dst, err := dialRoute(client.Context(), dialTimeout, src.RemoteAddr(), route, backendAddr, handshake, pc, false)
+	if err != nil {
+		errs.V(log, err).Info("failed to dial backend", "error", err, "backendAddr", backendAddr)
+		return
+	}
 	if err != nil {
 		return
 	}
@@ -61,27 +65,6 @@ func Forward(
 
 	log.Info("forwarding connection", "backendAddr", netutil.Host(dst.RemoteAddr()))
 	pipe(log, src, dst)
-}
-
-// errAllBackendsFailed is returned when all backends failed to dial.
-var errAllBackendsFailed = errors.New("all backends failed")
-
-// tryBackends tries backends until one succeeds or all fail.
-func tryBackends[T any](next nextBackendFunc, try func(log logr.Logger, backendAddr string) (logr.Logger, T, error)) (logr.Logger, T, error) {
-	for {
-		backendAddr, log, ok := next()
-		if !ok {
-			var zero T
-			return log, zero, errAllBackendsFailed
-		}
-
-		log, t, err := try(log, backendAddr)
-		if err != nil {
-			errs.V(log, err).Info("failed to try backend", "error", err)
-			continue
-		}
-		return log, t, nil
-	}
 }
 
 func emptyReadBuff(src netmc.MinecraftConn, dst net.Conn) error {
@@ -119,66 +102,43 @@ func pipe(log logr.Logger, src, dst net.Conn) {
 	}
 }
 
-type nextBackendFunc func() (backendAddr string, log logr.Logger, ok bool)
-
 func findRoute(
-	routes []config.Route,
+	dynCfg *types.DynamicConfig,
 	log logr.Logger,
 	client netmc.MinecraftConn,
 	handshake *packet.Handshake,
 ) (
+	backendAddr string,
 	newLog logr.Logger,
 	src net.Conn,
-	route *config.Route,
-	nextBackend nextBackendFunc,
 	err error,
 ) {
 	srcConn, ok := netmc.Assert[interface{ Conn() net.Conn }](client)
 	if !ok {
-		return log, src, nil, nil, errors.New("failed to assert connection as net.Conn")
+		return "", log, src, fmt.Errorf("client does not implement Conn()")
 	}
 	src = srcConn.Conn()
 
-	clearedHost := ClearVirtualHost(handshake.ServerAddress)
+	clearedHost := forwardutil.ClearVirtualHost(handshake.ServerAddress)
 	log = log.WithName("lite").WithValues(
 		"clientAddr", netutil.Host(src.RemoteAddr()),
 		"virtualHost", clearedHost,
 		"protocol", proto.Protocol(handshake.ProtocolVersion).String(),
 	)
 
-	host, route := FindRoute(clearedHost, routes...)
-	if route == nil {
-		return log.V(1), src, nil, nil, fmt.Errorf("no route configured for host %s", clearedHost)
+	host, endpoint := forwardutil.FindRoute(clearedHost, dynCfg)
+	if endpoint == nil {
+		return "", log, src, fmt.Errorf("no route found for %s", clearedHost)
 	}
 	log = log.WithValues("route", host)
 
-	if len(route.Backend) == 0 {
-		return log, src, route, nil, errors.New("no backend configured for route")
+	dstAddr, err := netutil.Parse(endpoint.BackendIP, src.RemoteAddr().Network())
+	if err != nil {
+		log.Info("failed to parse backend address", "wrongBackendAddr", endpoint, "error", err)
+		return "", log, src, fmt.Errorf("failed to parse backend address: %w", err)
 	}
 
-	tryBackends := route.Backend.Copy()
-	nextBackend = func() (string, logr.Logger, bool) {
-		if len(tryBackends) == 0 {
-			return "", log, false
-		}
-		// Pop first backend
-		backend := tryBackends[0]
-		tryBackends = tryBackends[1:]
-
-		dstAddr, err := netutil.Parse(backend, src.RemoteAddr().Network())
-		if err != nil {
-			log.Info("failed to parse backend address", "wrongBackendAddr", backend, "error", err)
-			return "", log, false
-		}
-		backendAddr := dstAddr.String()
-		if _, port := netutil.HostPort(dstAddr); port == 0 {
-			backendAddr = net.JoinHostPort(dstAddr.String(), "25565")
-		}
-
-		return backendAddr, log.WithValues("backendAddr", backendAddr), true
-	}
-
-	return log, src, route, nextBackend, nil
+	return
 }
 
 func dialRoute(
@@ -268,21 +228,19 @@ func update(pc *proto.PacketContext, h *packet.Handshake) {
 // ResolveStatusResponse resolves the status response for the matching route and caches it for a short time.
 func ResolveStatusResponse(
 	dialTimeout time.Duration,
-	routes []config.Route,
+	dynCfg *types.DynamicConfig,
 	log logr.Logger,
 	client netmc.MinecraftConn,
 	handshake *packet.Handshake,
 	handshakeCtx *proto.PacketContext,
 	statusRequestCtx *proto.PacketContext,
 ) (logr.Logger, *packet.StatusResponse, error) {
-	log, src, route, nextBackend, err := findRoute(routes, log, client, handshake)
+	backendAddr, log, src, route, err := findRoute(dynCfg, log, client, handshake)
 	if err != nil {
 		return log, nil, err
 	}
 
-	log, res, err := tryBackends(nextBackend, func(log logr.Logger, backendAddr string) (logr.Logger, *packet.StatusResponse, error) {
-		return resolveStatusResponse(src, dialTimeout, backendAddr, route, log, client, handshake, handshakeCtx, statusRequestCtx)
-	})
+	log, res, err := resolveStatusResponse(src, dialTimeout, backendAddr, route, log, client, handshake, handshakeCtx, statusRequestCtx)
 	if err != nil && route.Fallback != nil {
 		log.Info("failed to resolve status response, will use fallback status response", "error", err)
 

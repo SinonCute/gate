@@ -3,13 +3,13 @@ package proxy
 import (
 	"errors"
 	"fmt"
+	"gate/pkg/internal/future"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"go.minekube.com/gate/pkg/internal/future"
 	"go.minekube.com/gate/pkg/util/netutil"
 	"go.minekube.com/gate/pkg/util/sets"
 
@@ -30,8 +30,9 @@ type Player interface { // TODO convert to struct(?) bc this is a lot of methods
 	Inbound
 	netmc.PacketWriter
 
-	ID() uuid.UUID       // The Minecraft ID of the player.
-	Username() string    // The username of the player.
+	ID() uuid.UUID    // The Minecraft ID of the player.
+	Username() string // The username of the player.
+	Connection() netmc.MinecraftConn
 	Ping() time.Duration // The player's ping or -1 if currently unknown.
 	// Disconnect disconnects the player with a reason.
 	// Once called, further interface calls to this player become undefined.
@@ -41,6 +42,8 @@ type Player interface { // TODO convert to struct(?) bc this is a lot of methods
 	// The host should be in the format of "host:port" or just "host" in which case the port defaults to 25565.
 	// If the player is from a version lower than 1.20.5, this method will return ErrTransferUnsupportedClientProtocol.
 	TransferToHost(addr string) error
+	SetCurrentBackendServerAddress(addr net.Addr)
+	CurrentBackendServerAddress() string
 }
 
 type connectedPlayer struct {
@@ -62,6 +65,8 @@ type connectedPlayer struct {
 	clientSettingsPacket *packet.ClientSettings
 
 	clientBrand string // may be empty
+
+	currentBackendServerAddress atomic.Value // Stores string representation of net.Addr
 }
 
 var _ Player = (*connectedPlayer)(nil)
@@ -89,6 +94,10 @@ func newConnectedPlayer(
 		clientsideChannels: sets.NewCappedSet[string](maxClientsidePluginChannels),
 		ping:               ping,
 	}
+	return p
+}
+
+func (p *connectedPlayer) Connection() netmc.MinecraftConn {
 	return p
 }
 
@@ -150,6 +159,19 @@ func (p *connectedPlayer) setClientBrand(brand string) {
 	p.mu.Lock()
 	p.clientBrand = brand
 	p.mu.Unlock()
+}
+
+func (p *connectedPlayer) SetCurrentBackendServerAddress(addr net.Addr) {
+	if addr == nil {
+		p.currentBackendServerAddress.Store("")
+	} else {
+		p.currentBackendServerAddress.Store(addr.String())
+	}
+}
+
+func (p *connectedPlayer) CurrentBackendServerAddress() string {
+	s, _ := p.currentBackendServerAddress.Load().(string)
+	return s
 }
 
 var ErrTransferUnsupportedClientProtocol = errors.New("player version must be 1.20.5 to be able to transfer to another host")

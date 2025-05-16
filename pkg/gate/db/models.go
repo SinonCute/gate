@@ -73,15 +73,14 @@ type Endpoint struct {
 
 // RoutingRule represents a rule for routing traffic
 type RoutingRule struct {
-	RuleID                string    `db:"rule_id"`
-	ShieldID              string    `db:"shield_id"`
-	Domains               []string  `db:"domains"`
-	TargetEndpointID      string    `db:"target_endpoint_id"`
-	TargetEndpointPattern string    `db:"target_endpoint_name_pattern"`
-	EditionType           string    `db:"edition_type"`
-	Priority              int       `db:"priority"`
-	CreatedAt             time.Time `db:"created_at"`
-	UpdatedAt             time.Time `db:"updated_at"`
+	RuleID           string    `db:"rule_id"`
+	ShieldID         string    `db:"shield_id"`
+	Domains          []string  `db:"domains"`
+	TargetEndpointID string    `db:"target_endpoint_id"`
+	EditionType      string    `db:"edition_type"`
+	Priority         int       `db:"priority"`
+	CreatedAt        time.Time `db:"created_at"`
+	UpdatedAt        time.Time `db:"updated_at"`
 }
 
 // NewGate creates a new Gate instance with default values

@@ -7,24 +7,16 @@ import (
 	"time"
 
 	"gate/pkg/gate/db"
+	"gate/pkg/gate/types"
 
 	"github.com/redis/go-redis/v9"
 )
-
-// DynamicConfig holds the in-memory view of all dynamic config
-// loaded from the persistent database.
-type DynamicConfig struct {
-	Gate         *db.Gate
-	Shields      map[string]*db.Shield
-	Endpoints    map[string]*db.Endpoint
-	RoutingRules map[string]*db.RoutingRule
-}
 
 // DynamicConfigLoader loads and caches config from the database.
 type DynamicConfigLoader struct {
 	store  db.Store
 	mu     sync.RWMutex
-	config DynamicConfig
+	config types.DynamicConfig
 }
 
 // NewDynamicConfigLoader creates a new loader and loads initial config from DB.
@@ -66,7 +58,7 @@ func (l *DynamicConfigLoader) Refresh(ctx context.Context) error {
 		rules = append(rules, rs...)
 	}
 
-	cfg := DynamicConfig{
+	cfg := types.DynamicConfig{
 		Gate:         gate,
 		Shields:      make(map[string]*db.Shield),
 		Endpoints:    make(map[string]*db.Endpoint),
@@ -87,7 +79,7 @@ func (l *DynamicConfigLoader) Refresh(ctx context.Context) error {
 }
 
 // GetConfig returns a copy of the current dynamic config.
-func (l *DynamicConfigLoader) GetConfig() DynamicConfig {
+func (l *DynamicConfigLoader) GetConfig() types.DynamicConfig {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.config

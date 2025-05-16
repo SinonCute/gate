@@ -1,6 +1,9 @@
-package lite
+package forwardutil
 
-import "testing"
+import (
+	"gate/pkg/edition/java/lite"
+	"testing"
+)
 
 func Test_match(t *testing.T) {
 
@@ -37,7 +40,7 @@ func Test_match(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if got := match(test.s, test.pattern); got != test.want {
+		if got := lite.match(test.s, test.pattern); got != test.want {
 			t.Errorf("match(%q, %q) = %v, want %v", test.s, test.pattern, got, test.want)
 		}
 	}
@@ -48,6 +51,6 @@ func BenchmarkMatch(b *testing.B) {
 	pattern := "*str?ng*"
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		match(s, pattern)
+		lite.match(s, pattern)
 	}
 }

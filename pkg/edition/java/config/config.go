@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"gate/pkg/edition/java/proto/version"
 	"gate/pkg/util/componentutil"
 	"gate/pkg/util/configutil"
 	"gate/pkg/util/favicon"
 	"gate/pkg/util/validation"
+	"go.minekube.com/gate/pkg/edition/java/proto/version"
 )
 
 // DefaultConfig is a default Config.
@@ -52,8 +52,9 @@ type Config struct { // TODO use https://github.com/projectdiscovery/yamldoc-go 
 	ConnectionTimeout configutil.Duration `yaml:"connectionTimeout,omitempty" json:"connectionTimeout,omitempty"` // Write timeout
 	ReadTimeout       configutil.Duration `yaml:"readTimeout,omitempty" json:"readTimeout,omitempty"`             // Read timeout
 
-	Quota         Quota `yaml:"quota,omitempty" json:"quota,omitempty"`                 // Rate limiting settings
-	ProxyProtocol bool  `yaml:"proxyProtocol,omitempty" json:"proxyProtocol,omitempty"` // Enable HA-Proxy protocol mode
+	Quota         Quota       `yaml:"quota,omitempty" json:"quota,omitempty"` // Rate limiting settings
+	Compression   Compression `yaml:"compression,omitempty" json:"compression,omitempty"`
+	ProxyProtocol bool        `yaml:"proxyProtocol,omitempty" json:"proxyProtocol,omitempty"` // Enable HA-Proxy protocol mode
 
 	AcceptTransfers bool `yaml:"acceptTransfers,omitempty" json:"acceptTransfers,omitempty"` // Whether to accept transfers from other hosts via transfer packet
 

@@ -1,4 +1,4 @@
-package lite
+package forwardutil
 
 import (
 	"net"

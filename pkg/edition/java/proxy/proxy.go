@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gate/pkg/internal/addrquota"
 	"net"
 	"reflect"
 	"strings"
@@ -12,15 +13,14 @@ import (
 	"time"
 
 	"gate/pkg/edition/java/config"
-	"gate/pkg/edition/java/internal/addrquota"
-	"gate/pkg/edition/java/internal/reload"
-	"gate/pkg/edition/java/lite"
-	"gate/pkg/edition/java/netmc"
-	"gate/pkg/edition/java/proto/state"
-	"gate/pkg/gate/proto"
+	"gate/pkg/gate"
+	"gate/pkg/gate/db"
 	"gate/pkg/util/errs"
 	"gate/pkg/util/netutil"
 	"gate/pkg/util/uuid"
+	"go.minekube.com/gate/pkg/edition/java/netmc"
+	"go.minekube.com/gate/pkg/edition/java/proto/state"
+	"go.minekube.com/gate/pkg/gate/proto"
 
 	"github.com/go-logr/logr"
 	"github.com/pires/go-proxyproto"
@@ -43,6 +43,8 @@ type Proxy struct {
 	cancelStart context.CancelFunc
 	started     bool
 
+	dynamicConfigLoader *gate.DynamicConfigLoader
+
 	muS sync.RWMutex // Protects following field
 
 	muP         sync.RWMutex                   // Protects following fields
@@ -61,12 +63,17 @@ type Options struct {
 	// The event manager to use.
 	// If none is set, no events are sent.
 	EventMgr event.Manager
+	// DBStore is required to initialize the DynamicConfigLoader.
+	DBStore db.Store
 }
 
 // New returns a new Proxy ready to start.
 func New(options Options) (p *Proxy, err error) {
 	if options.Config == nil {
 		return nil, errs.ErrMissingConfig
+	}
+	if options.DBStore == nil {
+		return nil, fmt.Errorf("DBStore is required in Options for DynamicConfigLoader")
 	}
 	eventMgr := options.EventMgr
 	if eventMgr == nil {
@@ -80,6 +87,12 @@ func New(options Options) (p *Proxy, err error) {
 		playerNames: map[string]*connectedPlayer{},
 		playerIDs:   map[uuid.UUID]*connectedPlayer{},
 	}
+
+	dynLoader, err := gate.NewDynamicConfigLoader(context.Background(), options.DBStore)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dynamic config loader: %w", err)
+	}
+	p.dynamicConfigLoader = dynLoader
 
 	// Connection & login rate limiters
 	p.initQuota(&options.Config.Quota)
@@ -131,14 +144,8 @@ func (p *Proxy) Start(ctx context.Context) error {
 		if p.cfg.Debug {
 			p.log.Info("running in debug mode")
 		}
-		if p.cfg.Lite.Enabled {
-			p.log.Info("running in lite mode")
-		}
 		if p.cfg.ProxyProtocol {
 			p.log.Info("proxy protocol enabled")
-		}
-		if p.cfg.Auth.SessionServerURL != nil {
-			p.log.Info("using custom authentication server", "url", p.cfg.Auth.SessionServerURL)
 		}
 	}
 	logInfo()
@@ -157,45 +164,44 @@ func (p *Proxy) Start(ctx context.Context) error {
 		return stop
 	}
 
-	stopLn := listen(p.cfg.Bind)
+	_ = listen(p.cfg.Bind)
+	//stopLn
 
-	// Listen for config reloads until we exit
-	defer reload.Subscribe(p.event, func(e *javaConfigUpdateEvent) {
-		*p.cfg = *e.Config
-		p.initQuota(&e.Config.Quota)
-		if e.PrevConfig.Bind != e.Config.Bind {
-			p.closeMu.Lock()
-			stopLn()
-			stopLn = listen(e.Config.Bind)
-			p.closeMu.Unlock()
-		}
-		if e.Config.Lite.Enabled {
-			// reset whole cache if routes have changed because
-			// backend addrs might have moved to another route or a cacheTTL changed
-			if func() bool {
-				if len(e.Config.Lite.Routes) != len(e.PrevConfig.Lite.Routes) {
-					return true
-				}
-				for i, route := range e.Config.Lite.Routes {
-					if !route.Equal(&e.PrevConfig.Lite.Routes[i]) {
-						return true
-					}
-				}
-				return false
-			}() {
-				lite.ResetPingCache()
-				p.log.Info("lite ping cache was reset")
-			}
-		} else {
-			lite.ResetPingCache()
-		}
-		logInfo()
-	})()
+	//// Listen for config reloads until we exit
+	//defer reload.Subscribe(p.event, func(e *javaConfigUpdateEvent) {
+	//	*p.cfg = *e.Config
+	//	p.initQuota(&e.Config.Quota)
+	//	if e.PrevConfig.Bind != e.Config.Bind {
+	//		p.closeMu.Lock()
+	//		stopLn()
+	//		stopLn = listen(e.Config.Bind)
+	//		p.closeMu.Unlock()
+	//	}
+	//	if e.Config.Lite.Enabled {
+	//		// reset whole cache if routes have changed because
+	//		// backend addrs might have moved to another route or a cacheTTL changed
+	//		if func() bool {
+	//			if len(e.Config.Lite.Routes) != len(e.PrevConfig.Lite.Routes) {
+	//				return true
+	//			}
+	//			for i, route := range e.Config.Lite.Routes {
+	//				if !route.Equal(&e.PrevConfig.Lite.Routes[i]) {
+	//					return true
+	//				}
+	//			}
+	//			return false
+	//		}() {
+	//			ResetPingCache()
+	//			p.log.Info("lite ping cache was reset")
+	//		}
+	//	} else {
+	//		ResetPingCache()
+	//	}
+	//	logInfo()
+	//})()
 
 	return eg.Wait()
 }
-
-type javaConfigUpdateEvent = reload.ConfigUpdateEvent[config.Config]
 
 // Shutdown stops the Proxy and/or blocks until the Proxy has finished shutdown.
 //
@@ -243,6 +249,11 @@ func (p *Proxy) Config() config.Config {
 
 func (p *Proxy) config() *config.Config {
 	return p.cfg
+}
+
+// DynamicConfigLoader returns the proxy's dynamic configuration loader.
+func (p *Proxy) DynamicConfigLoader() *gate.DynamicConfigLoader {
+	return p.dynamicConfigLoader
 }
 
 // DisconnectAll disconnects all current connected players
@@ -382,71 +393,6 @@ func (p *Proxy) playerByName(username string) *connectedPlayer {
 		return nil
 	}
 	return player
-}
-
-func (p *Proxy) canRegisterConnection(player *connectedPlayer) bool {
-	c := p.cfg
-	if c.OnlineMode && c.OnlineModeKickExistingPlayers {
-		return true
-	}
-	lowerName := strings.ToLower(player.Username())
-	p.muP.RLock()
-	defer p.muP.RUnlock()
-	return p.playerNames[lowerName] == nil && p.playerIDs[player.ID()] == nil
-}
-
-// Attempts to register the connection with the proxy.
-func (p *Proxy) registerConnection(player *connectedPlayer) bool {
-	lowerName := strings.ToLower(player.Username())
-	c := p.cfg
-
-retry:
-	p.muP.Lock()
-	if c.OnlineModeKickExistingPlayers {
-		existing, ok := p.playerIDs[player.ID()]
-		if ok {
-			// Make sure we disconnect existing duplicate
-			// player connection before we register the new one.
-			//
-			// Disconnecting the existing connection will call p.unregisterConnection in the
-			// teardown needing the p.muP.Lock() so we unlock.
-			p.muP.Unlock()
-			existing.disconnectDueToDuplicateConnection.Store(true)
-			existing.Disconnect(&component.Translation{
-				Key: "multiplayer.disconnect.duplicate_login",
-			})
-			// Now we can retry in case another duplicate connection
-			// occurred before we could acquire the lock at `retry`.
-			//
-			// Meaning we keep disconnecting incoming duplicates until
-			// we can register our connection, but this shall be uncommon anyway. :)
-			goto retry
-		}
-	} else {
-		_, exists := p.playerNames[lowerName]
-		if exists {
-			return false
-		}
-		_, exists = p.playerIDs[player.ID()]
-		if exists {
-			return false
-		}
-	}
-
-	p.playerIDs[player.ID()] = player
-	p.playerNames[lowerName] = player
-	p.muP.Unlock()
-	return true
-}
-
-// unregisters a connected player
-func (p *Proxy) unregisterConnection(player *connectedPlayer) (found bool) {
-	p.muP.Lock()
-	defer p.muP.Unlock()
-	_, found = p.playerIDs[player.ID()]
-	delete(p.playerNames, strings.ToLower(player.Username()))
-	delete(p.playerIDs, player.ID())
-	return found
 }
 
 //

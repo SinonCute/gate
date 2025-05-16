@@ -5,8 +5,8 @@ import (
 	"gate/pkg/util/netutil"
 	"net"
 
-	"gate/pkg/edition/java/proto/version"
-	"gate/pkg/gate/proto"
+	"go.minekube.com/gate/pkg/edition/java/proto/version"
+	"go.minekube.com/gate/pkg/gate/proto"
 
 	"github.com/pires/go-proxyproto"
 )
