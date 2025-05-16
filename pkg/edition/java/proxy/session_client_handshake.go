@@ -2,25 +2,18 @@ package proxy
 
 import (
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/forge/modernforge"
 	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/robinbraemer/event"
-	"go.minekube.com/common/minecraft/color"
 	"go.minekube.com/common/minecraft/component"
-	"go.minekube.com/gate/pkg/edition/java/auth"
 	"go.minekube.com/gate/pkg/edition/java/config"
-	"go.minekube.com/gate/pkg/edition/java/forge"
 	"go.minekube.com/gate/pkg/edition/java/lite"
 	"go.minekube.com/gate/pkg/edition/java/netmc"
 	"go.minekube.com/gate/pkg/edition/java/proto/packet"
 	"go.minekube.com/gate/pkg/edition/java/proto/state"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/edition/java/proxy/phase"
 	"go.minekube.com/gate/pkg/gate/proto"
 	"go.minekube.com/gate/pkg/internal/addrquota"
 	"go.minekube.com/gate/pkg/util/netutil"
@@ -28,18 +21,13 @@ import (
 
 type sessionHandlerDeps struct {
 	proxy          *Proxy
-	registrar      playerRegistrar
 	eventMgr       event.Manager
 	configProvider configProvider
-	authenticator  auth.Authenticator
 	loginsQuota    *addrquota.Quota
 }
 
 func (d *sessionHandlerDeps) config() *config.Config {
 	return d.configProvider.config()
-}
-func (d *sessionHandlerDeps) auth() auth.Authenticator {
-	return d.authenticator
 }
 
 type handshakeSessionHandler struct {
@@ -128,47 +116,7 @@ func (h *handshakeSessionHandler) handleHandshake(handshake *packet.Handshake, p
 		// Just update the session handler and wait for the StatusRequest packet.
 		handler := newStatusSessionHandler(h.conn, inbound, h.sessionHandlerDeps, resolvePingResponse)
 		h.conn.SetActiveSessionHandler(state.Status, handler)
-	case state.Login:
-		// Client wants to join.
-		h.handleLogin(handshake, inbound)
 	}
-}
-
-func (h *handshakeSessionHandler) handleLogin(p *packet.Handshake, inbound *initialInbound) {
-	// Check for supported client version.
-	if !version.Protocol(p.ProtocolVersion).Supported() {
-		_ = inbound.disconnect(&component.Translation{
-			Key:  "multiplayer.disconnect.outdated_client",
-			With: []component.Component{&component.Text{Content: version.SupportedVersionsString}},
-		})
-		return
-	}
-
-	// Client IP-block rate limiter preventing too fast logins hitting the Mojang API
-	if h.loginsQuota != nil && h.loginsQuota.Blocked(netutil.Host(inbound.RemoteAddr())) {
-		_ = netmc.CloseWith(h.conn, packet.NewDisconnect(&component.Text{
-			Content: "You are logging in too fast, please calm down and retry.",
-			S:       component.Style{Color: color.Red},
-		}, proto.Protocol(p.ProtocolVersion), h.conn.State().State))
-		return
-	}
-
-	h.conn.SetType(handshakeConnectionType(p))
-
-	// If the proxy is configured for velocity's forwarding mode, we must deny connections from 1.12.2
-	// and lower, otherwise IP information will never get forwarded.
-	if h.config().Forwarding.Mode == config.VelocityForwardingMode &&
-		p.ProtocolVersion < int(version.Minecraft_1_13.Protocol) {
-		_ = netmc.CloseWith(h.conn, packet.NewDisconnect(&component.Text{
-			Content: "This server is only compatible with versions 1.13 and above.",
-		}, proto.Protocol(p.ProtocolVersion), h.conn.State().State))
-		return
-	}
-
-	lic := newLoginInboundConn(inbound)
-	h.eventMgr.Fire(&ConnectionHandshakeEvent{inbound: lic, intent: p.Intent()})
-	handler := newInitialLoginSessionHandler(h.conn, lic, h.sessionHandlerDeps)
-	h.conn.SetActiveSessionHandler(state.Login, handler)
 }
 
 func stateForProtocol(status int) *state.Registry {
@@ -180,25 +128,6 @@ func stateForProtocol(status int) *state.Registry {
 		return state.Login
 	}
 	return nil
-}
-
-func handshakeConnectionType(h *packet.Handshake) phase.ConnectionType {
-	if strings.Contains(h.ServerAddress, modernforge.Token) &&
-		h.ProtocolVersion >= int(version.Minecraft_1_20_2.Protocol) {
-		return phase.ModernForge
-	}
-	// Determine if we're using Forge (1.8 to 1.12, may not be the case in 1.13).
-	if h.ProtocolVersion < int(version.Minecraft_1_13.Protocol) &&
-		strings.HasSuffix(h.ServerAddress, forge.HandshakeHostnameToken) {
-		return phase.LegacyForge
-	} else if h.ProtocolVersion <= int(version.Minecraft_1_7_6.Protocol) {
-		// 1.7 Forge will not notify us during handshake. UNDETERMINED will listen for incoming
-		// forge handshake attempts. Also sends a reset handshake packet on every transition.
-		return phase.Undetermined17
-	}
-	// Note for future implementation: Forge 1.13+ identifies
-	// itself using a slightly different hostname token.
-	return phase.Vanilla
 }
 
 type initialInbound struct {

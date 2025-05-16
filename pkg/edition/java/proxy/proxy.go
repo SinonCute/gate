@@ -19,10 +19,8 @@ import (
 	"go.minekube.com/common/minecraft/component"
 	"go.minekube.com/common/minecraft/component/codec/legacy"
 	"go.minekube.com/gate/pkg/command"
-	"go.minekube.com/gate/pkg/edition/java/auth"
 	"go.minekube.com/gate/pkg/edition/java/config"
 	"go.minekube.com/gate/pkg/edition/java/netmc"
-	"go.minekube.com/gate/pkg/edition/java/proxy/message"
 	"go.minekube.com/gate/pkg/gate/proto"
 	"go.minekube.com/gate/pkg/internal/addrquota"
 	"go.minekube.com/gate/pkg/internal/connwrap"
@@ -30,18 +28,15 @@ import (
 	"go.minekube.com/gate/pkg/util/errs"
 	"go.minekube.com/gate/pkg/util/netutil"
 	"go.minekube.com/gate/pkg/util/uuid"
-	"go.minekube.com/gate/pkg/util/validation"
 	"golang.org/x/sync/errgroup"
 )
 
 // Proxy is Gate's Java edition Minecraft proxy.
 type Proxy struct {
-	log              logr.Logger
-	cfg              *config.Config
-	event            event.Manager
-	command          command.Manager
-	channelRegistrar *message.ChannelRegistrar
-	authenticator    auth.Authenticator
+	log     logr.Logger
+	cfg     *config.Config
+	event   event.Manager
+	command command.Manager
 
 	startTime atomic.Pointer[time.Time]
 
@@ -50,8 +45,7 @@ type Proxy struct {
 	cancelStart context.CancelFunc
 	started     bool
 
-	muS     sync.RWMutex                 // Protects following field
-	servers map[string]*registeredServer // registered backend servers: by lower case names
+	muS sync.RWMutex // Protects following field
 
 	muP         sync.RWMutex                   // Protects following fields
 	playerNames map[string]*connectedPlayer    // lower case usernames map
@@ -69,9 +63,6 @@ type Options struct {
 	// The event manager to use.
 	// If none is set, no events are sent.
 	EventMgr event.Manager
-	// Authenticator to authenticate users in online mode.
-	// If not set, creates a default one.
-	Authenticator auth.Authenticator
 }
 
 // New returns a new Proxy ready to start.
@@ -83,27 +74,13 @@ func New(options Options) (p *Proxy, err error) {
 	if eventMgr == nil {
 		eventMgr = event.Nop
 	}
-	authn := options.Authenticator
-	if authn == nil {
-		opts := auth.Options{
-			// Default to mojang's session server
-			HasJoinedURLFn: auth.CustomHasJoinedURL(options.Config.Auth.SessionServerURL.T()),
-		}
-		authn, err = auth.New(opts)
-		if err != nil {
-			return nil, fmt.Errorf("erorr creating authenticator: %w", err)
-		}
-	}
 
 	p = &Proxy{
-		log:              logr.Discard(), // updated by Proxy.Start
-		cfg:              options.Config,
-		event:            eventMgr,
-		channelRegistrar: message.NewChannelRegistrar(),
-		servers:          map[string]*registeredServer{},
-		playerNames:      map[string]*connectedPlayer{},
-		playerIDs:        map[uuid.UUID]*connectedPlayer{},
-		authenticator:    authn,
+		log:         logr.Discard(), // updated by Proxy.Start
+		cfg:         options.Config,
+		event:       eventMgr,
+		playerNames: map[string]*connectedPlayer{},
+		playerIDs:   map[uuid.UUID]*connectedPlayer{},
 	}
 
 	// Connection & login rate limiters
@@ -154,11 +131,6 @@ func (p *Proxy) Start(ctx context.Context) error {
 
 	if err := p.init(); err != nil {
 		return fmt.Errorf("pre-initialization error: %w", err)
-	}
-
-	// Init "plugins" with the proxy
-	if err := p.initPlugins(ctx); err != nil {
-		return err
 	}
 
 	logInfo := func() {
@@ -282,52 +254,12 @@ func (p *Proxy) Shutdown(reason component.Component) {
 func (p *Proxy) init() (err error) {
 	c := p.cfg
 
-	// No need to check, nil default to mojang's session server
-	p.authenticator.SetHasJoinedURLFn(auth.CustomHasJoinedURL(c.Auth.SessionServerURL.T()))
-
-	if !c.Lite.Enabled {
-		// Register servers
-		if len(c.Servers) != 0 {
-			p.log.Info("registering servers...", "count", len(c.Servers))
-		}
-		for name, addr := range c.Servers {
-			pAddr, err := netutil.Parse(addr, "tcp")
-			if err != nil {
-				return fmt.Errorf("error parsing server %q address %q: %w", name, addr, err)
-			}
-			info := NewServerInfo(name, pAddr)
-
-			// Check if server is already registered and equal to the one we want to register.
-			if rs := p.Server(name); rs != nil && ServerInfoEqual(rs.ServerInfo(), info) {
-				continue
-			}
-
-			_ = p.Unregister(info)
-			_, err = p.Register(info)
-			if err != nil {
-				p.log.Error(err, "could not register server", "server", info)
-			}
-		}
-
-		// Register builtin commands
-		if c.BuiltinCommands {
-			names := p.registerBuiltinCommands()
-			p.log.Info("registered builtin commands", "count", len(names), "cmds", names)
-		}
+	// Register builtin commands
+	if c.BuiltinCommands {
+		names := p.registerBuiltinCommands()
+		p.log.Info("registered builtin commands", "count", len(names), "cmds", names)
 	}
 
-	return nil
-}
-
-func (p *Proxy) initPlugins(ctx context.Context) error {
-	log := logr.FromContextOrDiscard(ctx)
-	for _, pl := range Plugins {
-		start := time.Now()
-		if err := pl.Init(ctx, p); err != nil {
-			return fmt.Errorf("error running init hook for plugin %q: %w", pl.Name, err)
-		}
-		log.Info("initialized plugin", "name", pl.Name, "time", time.Since(start).Round(time.Millisecond).String())
-	}
 	return nil
 }
 
@@ -348,104 +280,6 @@ func (p *Proxy) Config() config.Config {
 
 func (p *Proxy) config() *config.Config {
 	return p.cfg
-}
-
-// Server gets a backend server registered with the proxy by name.
-// Returns nil if not found.
-func (p *Proxy) Server(name string) RegisteredServer {
-	s := p.server(name)
-	if s == (*registeredServer)(nil) {
-		return nil // return correct nil
-	}
-	return s
-}
-
-func (p *Proxy) server(name string) *registeredServer {
-	name = strings.ToLower(name)
-	p.muS.RLock()
-	s := p.servers[name] // may be nil
-	p.muS.RUnlock()
-	return s
-}
-
-// Servers gets all registered servers.
-func (p *Proxy) Servers() []RegisteredServer {
-	p.muS.RLock()
-	defer p.muS.RUnlock()
-	l := make([]RegisteredServer, 0, len(p.servers))
-	for _, rs := range p.servers {
-		l = append(l, rs)
-	}
-	return l
-}
-
-// ServerRegistry is used to retrieve registered servers that players can connect to.
-type ServerRegistry interface {
-	// Server gets a registered server by name or returns nil if not found.
-	Server(name string) RegisteredServer
-	ServerRegistrar
-}
-
-// ServerRegistrar is used to register servers.
-type ServerRegistrar interface {
-	// Register registers a server with the proxy and returns it.
-	// If the there is already a server with the same info
-	// error ErrServerAlreadyExists is returned and the already registered server.
-	Register(info ServerInfo) (RegisteredServer, error)
-	// Unregister unregisters the server exactly matching the
-	// given ServerInfo and returns true if found.
-	Unregister(info ServerInfo) bool
-}
-
-// ErrServerAlreadyExists indicates that a server is already registered in ServerRegistrar.
-var ErrServerAlreadyExists = errors.New("server already exists")
-
-var _ ServerRegistry = (*Proxy)(nil)
-
-// Register - See ServerRegistrar
-func (p *Proxy) Register(info ServerInfo) (RegisteredServer, error) {
-	if info == nil {
-		return nil, errors.New("info must not be nil")
-	}
-	if !validation.ValidServerName(info.Name()) {
-		return nil, errors.New("invalid server name")
-	}
-	if err := validation.ValidHostPort(info.Addr().String()); err != nil {
-		return nil, fmt.Errorf("invalid address: %w", err)
-	}
-
-	name := strings.ToLower(info.Name())
-
-	p.muS.Lock()
-	defer p.muS.Unlock()
-	if exists, ok := p.servers[name]; ok {
-		return exists, ErrServerAlreadyExists
-	}
-	rs := newRegisteredServer(info)
-	p.servers[name] = rs
-
-	p.log.Info("registered new server", "name", info.Name(), "addr", info.Addr())
-	return rs, nil
-}
-
-// Unregister unregisters the server exactly matching the
-// given ServerInfo and returns true if found.
-func (p *Proxy) Unregister(info ServerInfo) bool {
-	if info == nil {
-		return false
-	}
-	name := strings.ToLower(info.Name())
-	p.muS.Lock()
-	defer p.muS.Unlock()
-	rs, ok := p.servers[name]
-	if !ok || !ServerInfoEqual(rs.ServerInfo(), info) {
-		return false
-	}
-	delete(p.servers, name)
-
-	p.log.Info("unregistered backend server",
-		"name", info.Name(), "addr", info.Addr())
-	return true
 }
 
 // DisconnectAll disconnects all current connected players
@@ -548,10 +382,8 @@ func (p *Proxy) HandleConn(raw net.Conn) {
 	)
 	conn.SetActiveSessionHandler(state.Handshake, newHandshakeSessionHandler(conn, &sessionHandlerDeps{
 		proxy:          p,
-		registrar:      p,
 		configProvider: p,
 		eventMgr:       p.event,
-		authenticator:  p.authenticator,
 		loginsQuota:    p.loginsQuota,
 	}))
 	readLoop()
@@ -670,17 +502,6 @@ func (p *Proxy) unregisterConnection(player *connectedPlayer) (found bool) {
 	delete(p.playerNames, strings.ToLower(player.Username()))
 	delete(p.playerIDs, player.ID())
 	return found
-}
-
-//
-//
-//
-//
-//
-//
-
-func (p *Proxy) ChannelRegistrar() *message.ChannelRegistrar {
-	return p.channelRegistrar
 }
 
 //

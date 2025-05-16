@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	"go.minekube.com/gate/pkg/edition/java/forge/modinfo"
 	"go.minekube.com/gate/pkg/edition/java/netmc"
 	"go.minekube.com/gate/pkg/edition/java/ping"
 	"go.minekube.com/gate/pkg/edition/java/proto/packet"
@@ -78,29 +77,6 @@ func (h *statusSessionHandler) HandlePacket(pc *proto.PacketContext) {
 
 var versionName = fmt.Sprintf("Gate %s", version.SupportedVersionsString)
 
-func newInitialPing(p *Proxy, protocol proto.Protocol) *ping.ServerPing {
-	if !version.Protocol(protocol).Supported() {
-		protocol = version.MaximumVersion.Protocol
-	}
-	var modInfo *modinfo.ModInfo
-	if p.cfg.AnnounceForge {
-		modInfo = modinfo.Default
-	}
-	return &ping.ServerPing{
-		Version: ping.Version{
-			Protocol: protocol,
-			Name:     versionName,
-		},
-		Players: &ping.Players{
-			Online: p.PlayerCount(),
-			Max:    p.cfg.Status.ShowMaxPlayers,
-		},
-		Description: p.cfg.Status.Motd.T(),
-		Favicon:     p.cfg.Status.Favicon,
-		ModInfo:     modInfo,
-	}
-}
-
 func (h *statusSessionHandler) handleStatusRequest(pc *proto.PacketContext) {
 	if h.receivedRequest {
 		// Already sent response
@@ -109,39 +85,33 @@ func (h *statusSessionHandler) handleStatusRequest(pc *proto.PacketContext) {
 	}
 	h.receivedRequest = true
 
-	e := &PingEvent{
-		inbound: h.inbound,
-	}
-
 	log := h.log
-	if h.resolvePingResponse == nil {
-		e.ping = newInitialPing(h.proxy, pc.Protocol)
-	} else {
-		var err error
-		var res *packet.StatusResponse
-		log, res, err = h.resolvePingResponse(h.log, pc)
-		if err != nil {
-			errs.V(log, err).Info("could not resolve ping", "error", err)
-			_ = h.conn.Close()
-			return
-		}
-		if !h.eventMgr.HasSubscriber(e) {
-			// Fast path: No event handler, just send response
-			_ = h.conn.WritePacket(res)
-			return
-		}
-		// Need to unmarshal status response to ping struct for event handlers
-		e.ping = new(ping.ServerPing)
-		if err = json.Unmarshal([]byte(res.Status), e.ping); err != nil {
-			h.log.V(1).Error(err, "failed to unmarshal status response")
-			_ = h.conn.Close()
-			return
-		}
+	var err error
+	var res *packet.StatusResponse
+	var pingIternal *ping.ServerPing
+	log, res, err = h.resolvePingResponse(h.log, pc)
+	if err != nil {
+		errs.V(log, err).Info("could not resolve ping", "error", err)
+		_ = h.conn.Close()
+		return
+	}
+	if !h.eventMgr.HasSubscriber(pingIternal) {
+		// Fast path: No event handler, just send response
+		_ = h.conn.WritePacket(res)
+		return
 	}
 
-	h.eventMgr.Fire(e)
+	// Need to unmarshal status response to ping struct for event handlers
+	pingIternal = new(ping.ServerPing)
+	if err = json.Unmarshal([]byte(res.Status), pingIternal); err != nil {
+		h.log.V(1).Error(err, "failed to unmarshal status response")
+		_ = h.conn.Close()
+		return
+	}
 
-	if e.ping == nil {
+	h.eventMgr.Fire(pingIternal)
+
+	if pingIternal == nil {
 		_ = h.conn.Close()
 		log.V(1).Info("ping response was set to nil by an event handler, no response is sent")
 		return
@@ -150,7 +120,7 @@ func (h *statusSessionHandler) handleStatusRequest(pc *proto.PacketContext) {
 		return
 	}
 
-	response, err := json.Marshal(e.ping)
+	response, err := json.Marshal(pingIternal)
 	if err != nil {
 		_ = h.conn.Close()
 		log.Error(err, "error marshaling ping response to json")
