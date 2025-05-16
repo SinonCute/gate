@@ -10,7 +10,6 @@ import (
 	"go.minekube.com/common/minecraft/component"
 	"go.minekube.com/gate/pkg/edition/java/proto/packet"
 	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/edition/java/proxy/crypto"
 	"go.minekube.com/gate/pkg/edition/java/proxy/message"
 	"go.minekube.com/gate/pkg/gate/proto"
 	"go.uber.org/atomic"
@@ -21,7 +20,6 @@ type (
 	// client logging into the proxy using login plugin messages.
 	LoginPhaseConnection interface {
 		Inbound
-		crypto.KeyIdentifiable
 		SendLoginPluginMessage(identifier message.ChannelIdentifier, contents []byte, consumer MessageConsumer) error
 	}
 
@@ -49,8 +47,6 @@ type loginInboundConn struct {
 	loginMessagesToSend  deque.Deque[*packet.LoginPluginMessage]
 	isLoginEventFired    bool
 	onAllMessagesHandled func() error
-
-	playerKey crypto.IdentifiedKey
 }
 
 func newLoginInboundConn(delegate *initialInbound) *loginInboundConn {
@@ -73,8 +69,6 @@ func (l *loginInboundConn) HandshakeIntent() packet.HandshakeIntent {
 func (l *loginInboundConn) RemoteAddr() net.Addr { return l.delegate.RemoteAddr() }
 
 func (l *loginInboundConn) Active() bool { return l.delegate.Active() }
-
-func (l *loginInboundConn) IdentifiedKey() crypto.IdentifiedKey { return l.playerKey }
 
 func (l *loginInboundConn) Context() context.Context { return l.delegate.Context() }
 
