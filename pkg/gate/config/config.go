@@ -3,11 +3,10 @@ package config
 import (
 	"fmt"
 
-	bconfig "go.minekube.com/gate/pkg/edition/bedrock/config"
-	jconfig "go.minekube.com/gate/pkg/edition/java/config"
-	"go.minekube.com/gate/pkg/internal/api"
-	connect "go.minekube.com/gate/pkg/util/connectutil/config"
-	"go.minekube.com/gate/pkg/util/validation"
+	bconfig "gate/pkg/edition/bedrock/config"
+	jconfig "gate/pkg/edition/java/config"
+	"gate/pkg/gate/db"
+	"gate/pkg/util/validation"
 )
 
 // DefaultConfig is a default Config.
@@ -27,11 +26,47 @@ var DefaultConfig = Config{
 		Enabled: false,
 		Bind:    "0.0.0.0:9090",
 	},
-	Connect: connect.DefaultConfig,
 	API: API{
 		Enabled: false,
 		Config:  api.DefaultConfig,
 	},
+	Database: *db.DefaultConfig(),
+	Redis:    *DefaultRedisConfig(),
+	Gate:     *DefaultGateInstanceConfig(),
+}
+
+type GateInstanceConfig struct {
+	// If empty, "default" will be used.
+	GateID        string `json:"gateId" yaml:"gateId"`
+	Role          string `json:"role" yaml:"role"`
+	PublicAddress string `json:"publicAddress" yaml:"publicAddress"`
+}
+
+func DefaultGateInstanceConfig() *GateInstanceConfig {
+	return &GateInstanceConfig{
+		GateID:        "default",
+		Role:          "regional",
+		PublicAddress: "",
+	}
+}
+
+// RedisConfig holds Redis connection and pubsub info.
+type RedisConfig struct {
+	Host     string `json:"host" yaml:"host"`
+	Port     int    `json:"port" yaml:"port"`
+	Password string `json:"password" yaml:"password"`
+	DB       int    `json:"db" yaml:"db"`
+	Channel  string `json:"channel" yaml:"channel"`
+}
+
+func DefaultRedisConfig() *RedisConfig {
+	return &RedisConfig{
+		Host:     "localhost",
+		Port:     6379,
+		Password: "",
+		DB:       0,
+		Channel:  "gate_config_updates",
+	}
 }
 
 // Config is the root configuration of Gate.
@@ -43,10 +78,12 @@ type Config struct {
 	Editions Editions `json:"editions,omitempty" yaml:"editions,omitempty"`
 	// See HealthService struct.
 	HealthService HealthService `json:"healthService,omitempty" yaml:"healthService,omitempty"`
-	// See Connect struct.
-	Connect connect.Config `json:"connect,omitempty" yaml:"connect,omitempty"`
-	// See API struct.
-	API API `json:"api,omitempty" yaml:"api,omitempty"`
+	// See Database struct.
+	Database db.Config `json:"database,omitempty" yaml:"database,omitempty"`
+	// See Redis struct.
+	Redis RedisConfig `json:"redis,omitempty" yaml:"redis,omitempty"`
+	// See GateInstanceConfig struct.
+	Gate GateInstanceConfig `json:"gate,omitempty" yaml:"gate,omitempty"`
 }
 
 // Editions provides Minecraft edition specific configs.
@@ -74,12 +111,6 @@ type Bedrock struct {
 type HealthService struct {
 	Enabled bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Bind    string `json:"bind,omitempty" yaml:"bind,omitempty"`
-}
-
-// API is the configuration for the Gate API.
-type API struct {
-	Enabled bool       `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Config  api.Config `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // Validate validates a Config and all enabled edition configs (Java / Bedrock).
@@ -114,10 +145,5 @@ func (c *Config) Validate() (warns []error, errs []error) {
 	//	warns = append(warns, prefix("bedrock", warns2)...)
 	//	errs = append(errs, prefix("bedrock", errs2)...)
 	//}
-	if c.API.Enabled {
-		warns2, errs2 := c.API.Config.Validate()
-		warns = append(warns, prefix("api", warns2)...)
-		errs = append(errs, prefix("api", errs2)...)
-	}
 	return
 }

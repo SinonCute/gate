@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"go.minekube.com/gate/pkg/edition/java/forge/modinfo"
-	"go.minekube.com/gate/pkg/edition/java/ping"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/util/configutil"
-	"go.minekube.com/gate/pkg/util/favicon"
-	"go.minekube.com/gate/pkg/util/netutil"
+	"gate/pkg/edition/java/forge/modinfo"
+	"gate/pkg/edition/java/ping"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/configutil"
+	"gate/pkg/util/favicon"
+	"gate/pkg/util/netutil"
 )
 
 // DefaultConfig is the default configuration for Lite mode.

@@ -10,11 +10,12 @@ import (
 	"reflect"
 	"sync"
 
+	"gate/pkg/edition/java/proto/state"
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/gate/proto"
+
 	"github.com/go-logr/logr"
-	"go.minekube.com/gate/pkg/edition/java/proto/state"
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/gate/proto"
 )
 
 const (

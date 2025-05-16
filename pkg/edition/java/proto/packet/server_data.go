@@ -1,13 +1,13 @@
 package packet
 
 import (
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/chat"
 	"io"
 
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/util/favicon"
+	"gate/pkg/edition/java/proto/packet/chat"
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/favicon"
 )
 
 type ServerData struct {

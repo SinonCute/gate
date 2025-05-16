@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"net"
 
+	"gate/pkg/edition/java/proto/packet"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/edition/java/proxy/message"
+	"gate/pkg/gate/proto"
+
 	"github.com/gammazero/deque"
 	"go.minekube.com/common/minecraft/component"
-	"go.minekube.com/gate/pkg/edition/java/proto/packet"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/edition/java/proxy/message"
-	"go.minekube.com/gate/pkg/gate/proto"
 	"go.uber.org/atomic"
 )
 

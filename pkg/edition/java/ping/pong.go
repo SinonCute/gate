@@ -6,24 +6,23 @@ import (
 	"fmt"
 	"strings"
 
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/componentutil"
+	"gate/pkg/util/favicon"
+	"gate/pkg/util/uuid"
+
 	"go.minekube.com/common/minecraft/component"
 	"go.minekube.com/common/minecraft/component/codec/legacy"
-	"go.minekube.com/gate/pkg/edition/java/forge/modinfo"
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/util/componentutil"
-	"go.minekube.com/gate/pkg/util/favicon"
-	"go.minekube.com/gate/pkg/util/uuid"
 	"gopkg.in/yaml.v3"
 )
 
 // ServerPing is a 1.7 and above server list ping response.
 type ServerPing struct {
-	Version     Version          `json:"version,omitempty" yaml:"version,omitempty"`
-	Players     *Players         `json:"players,omitempty" yaml:"players,omitempty"`
-	Description *component.Text  `json:"description" yaml:"description"`
-	Favicon     favicon.Favicon  `json:"favicon,omitempty" yaml:"favicon,omitempty"`
-	ModInfo     *modinfo.ModInfo `json:"modinfo,omitempty" yaml:"modinfo,omitempty"`
+	Version     Version         `json:"version,omitempty" yaml:"version,omitempty"`
+	Players     *Players        `json:"players,omitempty" yaml:"players,omitempty"`
+	Description *component.Text `json:"description" yaml:"description"`
+	Favicon     favicon.Favicon `json:"favicon,omitempty" yaml:"favicon,omitempty"`
 }
 
 // Make sure ServerPing implements the interfaces at compile time.

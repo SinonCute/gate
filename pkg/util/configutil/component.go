@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"go.minekube.com/common/minecraft/component"
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/util/componentutil"
+	"common/minecraft/component"
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/util/componentutil"
+
 	"gopkg.in/yaml.v3"
 )
 

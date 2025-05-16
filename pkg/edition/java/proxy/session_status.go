@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"gate/pkg/edition/java/netmc"
+	"gate/pkg/edition/java/ping"
+	"gate/pkg/edition/java/proto/packet"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/errs"
+
 	"github.com/go-logr/logr"
-	"go.minekube.com/gate/pkg/edition/java/netmc"
-	"go.minekube.com/gate/pkg/edition/java/ping"
-	"go.minekube.com/gate/pkg/edition/java/proto/packet"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/util/errs"
 )
 
 type statusSessionHandler struct {

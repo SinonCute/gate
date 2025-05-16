@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"go.minekube.com/gate/pkg/gate/proto"
+	"gate/pkg/gate/proto"
 )
 
 var (

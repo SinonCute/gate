@@ -3,10 +3,10 @@ package message
 import (
 	"sync"
 
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/plugin"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/util/sets"
+	"gate/pkg/edition/java/proto/packet/plugin"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/sets"
 )
 
 // ChannelRegistrar is a plugin message channel registrar.

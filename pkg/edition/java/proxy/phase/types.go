@@ -1,8 +1,8 @@
 package phase
 
 import (
-	"go.minekube.com/gate/pkg/edition/java/config"
-	"go.minekube.com/gate/pkg/edition/java/profile"
+	"gate/pkg/edition/java/config"
+	"gate/pkg/edition/java/profile"
 )
 
 // The connection types supported.

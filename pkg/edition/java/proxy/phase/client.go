@@ -1,7 +1,7 @@
 package phase
 
 import (
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/plugin"
+	"gate/pkg/edition/java/proto/packet/plugin"
 )
 
 var (

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"sync"
 
-	"go.minekube.com/gate/pkg/internal/bufpool"
+	"gate/pkg/internal/bufpool"
 )
 
 var encodePool, compressPool poolMap

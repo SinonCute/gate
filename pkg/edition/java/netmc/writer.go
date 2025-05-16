@@ -5,9 +5,10 @@ import (
 	"net"
 	"time"
 
+	"gate/pkg/edition/java/proto/codec"
+	"gate/pkg/gate/proto"
+
 	"github.com/go-logr/logr"
-	"go.minekube.com/gate/pkg/edition/java/proto/codec"
-	"go.minekube.com/gate/pkg/gate/proto"
 )
 
 // Writer is a packet writer.

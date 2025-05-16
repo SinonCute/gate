@@ -3,9 +3,9 @@ package packet
 import (
 	"errors"
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/util/netutil"
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/netutil"
 	"io"
 	"net"
 )

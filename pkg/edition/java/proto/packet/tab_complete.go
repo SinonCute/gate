@@ -2,11 +2,12 @@ package packet
 
 import (
 	"errors"
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/chat"
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/gate/proto"
 	"io"
+
+	"gate/pkg/edition/java/proto/packet/chat"
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/gate/proto"
 )
 
 const VanillaMaxTabCompleteLen = 2048

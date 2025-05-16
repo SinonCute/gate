@@ -1,10 +1,11 @@
 package packet
 
 import (
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/chat"
-	protoutil "go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/gate/proto"
 	"io"
+
+	"gate/pkg/edition/java/proto/packet/chat"
+	protoutil "gate/pkg/edition/java/proto/util"
+	"gate/pkg/gate/proto"
 )
 
 type ServerLinks struct {

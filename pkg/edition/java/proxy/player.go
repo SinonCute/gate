@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -10,10 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/robinbraemer/event"
-
-	cfgpacket "go.minekube.com/gate/pkg/edition/java/proto/packet/config"
-	"go.minekube.com/gate/pkg/edition/java/proto/state"
 	"go.minekube.com/gate/pkg/internal/future"
 	"go.minekube.com/gate/pkg/util/netutil"
 	"go.minekube.com/gate/pkg/util/sets"
@@ -23,16 +18,10 @@ import (
 	"go.minekube.com/common/minecraft/component/codec/legacy"
 	"go.uber.org/atomic"
 
-	"go.minekube.com/gate/pkg/edition/java/config"
 	"go.minekube.com/gate/pkg/edition/java/netmc"
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/chat"
-
-	"go.minekube.com/gate/pkg/command"
 	"go.minekube.com/gate/pkg/edition/java/profile"
 	"go.minekube.com/gate/pkg/edition/java/proto/packet"
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/title"
 	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/util/permission"
 	"go.minekube.com/gate/pkg/util/uuid"
 )
 
@@ -41,15 +30,12 @@ type Player interface { // TODO convert to struct(?) bc this is a lot of methods
 	Inbound
 	netmc.PacketWriter
 
-	ID() uuid.UUID    // The Minecraft ID of the player.
-	Username() string // The username of the player.
-	// CurrentServer returns the current server connection of the player.
+	ID() uuid.UUID       // The Minecraft ID of the player.
+	Username() string    // The username of the player.
 	Ping() time.Duration // The player's ping or -1 if currently unknown.
 	// Disconnect disconnects the player with a reason.
 	// Once called, further interface calls to this player become undefined.
 	Disconnect(reason component.Component)
-	// SendActionBar sends an action bar to the player.
-	SendActionBar(msg component.Component) error
 	ClientBrand() string // Returns the player's client brand. Empty if unspecified.
 	// TransferToHost transfers the player to the specified host.
 	// The host should be in the format of "host:port" or just "host" in which case the port defaults to 25565.
@@ -65,7 +51,6 @@ type connectedPlayer struct {
 	virtualHost     net.Addr
 	ping            atomic.Duration
 	profile         *profile.GameProfile
-	permFunc        permission.Func
 	handshakeIntent packet.HandshakeIntent
 	// This field is true if this connection is being disconnected
 	// due to another connection logging in with the same GameProfile.
@@ -103,7 +88,6 @@ func newConnectedPlayer(
 		handshakeIntent:    handshakeIntent,
 		clientsideChannels: sets.NewCappedSet[string](maxClientsidePluginChannels),
 		ping:               ping,
-		permFunc:           func(string) permission.TriState { return permission.Undefined },
 	}
 	return p
 }
@@ -129,101 +113,9 @@ func (p *connectedPlayer) Active() bool {
 	return !netmc.Closed(p.MinecraftConn)
 }
 
-// WithMessageSender modifies the sender identity of the chat message.
-func WithMessageSender(id uuid.UUID) command.MessageOption {
-	return messageApplyOption(func(o any) {
-		if b, ok := o.(*chat.Builder); ok {
-			b.Sender = id
-		}
-	})
-}
-
-// MessageType is a chat message type.
-type MessageType = chat.MessageType
-
-// Chat message types.
-const (
-	// ChatMessageType is a standard chat message and
-	// lets the chat message appear in the client's HUD.
-	// These messages can be filtered out by the client's settings.
-	ChatMessageType = chat.ChatMessageType
-	// SystemMessageType is a system chat message.
-	// e.g. client is willing to accept messages from commands,
-	// but does not want general chat from other players.
-	// It lets the chat message appear in the client's HUD and can't be dismissed.
-	SystemMessageType = chat.SystemMessageType
-	// GameInfoMessageType lets the chat message appear above the player's main HUD.
-	// This text format doesn't support many component features, such as hover events.
-	GameInfoMessageType = chat.GameInfoMessageType
-)
-
-// WithMessageType modifies chat message type.
-func WithMessageType(t MessageType) command.MessageOption {
-	return messageApplyOption(func(o any) {
-		if b, ok := o.(*chat.Builder); ok {
-			if t != ChatMessageType {
-				t = SystemMessageType
-			}
-			b.Type = t
-		}
-	})
-}
-
 type messageApplyOption func(o any)
 
 func (a messageApplyOption) Apply(o any) { a(o) }
-
-func (p *connectedPlayer) SendMessage(msg component.Component, opts ...command.MessageOption) error {
-	if msg == nil {
-		return nil // skip nil message
-	}
-	b := chat.Builder{
-		Protocol:  p.Protocol(),
-		Type:      ChatMessageType,
-		Sender:    p.ID(),
-		Component: msg,
-	}
-	for _, o := range opts {
-		o.Apply(b)
-	}
-	return p.WritePacket(b.ToClient())
-}
-
-var legacyJsonCodec = &legacy.Legacy{}
-
-func (p *connectedPlayer) SendActionBar(msg component.Component) error {
-	if msg == nil {
-		return nil // skip nil message
-	}
-	protocol := p.Protocol()
-	if protocol.GreaterEqual(version.Minecraft_1_11) {
-		// Use the title packet instead.
-		pkt, err := title.New(protocol, &title.Builder{
-			Action:    title.SetActionBar,
-			Component: *chat.FromComponent(msg),
-		})
-		if err != nil {
-			return err
-		}
-		return p.WritePacket(pkt)
-	}
-
-	// Due to issues with action bar packets, we'll need to convert the text message into a
-	// legacy message and then put the legacy text into a component... (╯°□°)╯︵ ┻━┻!
-	b := new(strings.Builder)
-	if err := legacyJsonCodec.Marshal(b, msg); err != nil {
-		return err
-	}
-	m, err := json.Marshal(map[string]string{"text": b.String()})
-	if err != nil {
-		return err
-	}
-	return p.WritePacket(&chat.LegacyChat{
-		Message: string(m),
-		Type:    chat.GameInfoMessageType,
-		Sender:  uuid.Nil,
-	})
-}
 
 func (p *connectedPlayer) Username() string { return p.profile.Name }
 
@@ -246,32 +138,6 @@ func (p *connectedPlayer) Disconnect(reason component.Component) {
 }
 
 func (p *connectedPlayer) String() string { return p.profile.Name }
-
-// ClientSettingsPacket returns the last known client settings packet.
-// If not known already, returns nil.
-func (p *connectedPlayer) ClientSettingsPacket() *packet.ClientSettings {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.clientSettingsPacket
-}
-
-func (p *connectedPlayer) config() *config.Config {
-	return p.configProvider.config()
-}
-
-// switchToConfigState switches the connection of the client into config state.
-func (p *connectedPlayer) switchToConfigState() {
-	if err := p.BufferPacket(new(cfgpacket.StartUpdate)); err != nil {
-		p.log.Error(err, "error writing config packet")
-	}
-
-	p.pendingConfigurationSwitch = true
-	p.MinecraftConn.Writer().SetState(state.Config)
-	// Make sure we don't send any play packets to the player after update start
-	p.MinecraftConn.EnablePlayPacketQueue()
-
-	_ = p.Flush() // Trigger switch finally
-}
 
 func (p *connectedPlayer) ClientBrand() string {
 	p.mu.RLock()
@@ -310,25 +176,18 @@ func (p *connectedPlayer) TransferToHost(addr string) error {
 
 	targetAddr := netutil.NewAddr(fmt.Sprintf("%s:%d", host, portInt), "tcp")
 	f := future.NewChan[error]()
-	event.FireParallel(p.eventMgr, newPreTransferEvent(p, targetAddr), func(e *PreTransferEvent) {
-		defer f.Complete(nil)
-		if e.Allowed() {
-			resultedAddr := e.Addr()
-			if resultedAddr != nil {
-				resultedAddr = targetAddr
-			}
-			host, port := netutil.HostPort(resultedAddr)
-			err = p.WritePacket(&packet.Transfer{
-				Host: host,
-				Port: int(port),
-			})
-			if err != nil {
-				f.Complete(err)
-				return
-			}
-			p.log.Info("transferring player to host", "host", resultedAddr)
-		}
+
+	hostTarget, portTarget := netutil.HostPort(targetAddr)
+	err = p.WritePacket(&packet.Transfer{
+		Host: hostTarget,
+		Port: int(portTarget),
 	})
+	if err != nil {
+		f.Complete(err)
+		return f.Get()
+	}
+	p.log.Info("transferring player to host", "host", targetAddr)
+
 	return f.Get()
 }
 

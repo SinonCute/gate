@@ -10,10 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"gate/pkg/edition/java/proto/codec"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/errs"
+
 	"github.com/go-logr/logr"
-	"go.minekube.com/gate/pkg/edition/java/proto/codec"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/util/errs"
 )
 
 // Reader is a packet reader.

@@ -5,11 +5,11 @@ import (
 	"io"
 	"strconv"
 
-	"go.minekube.com/brigodier"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/gate/proto"
+	"brigodier"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/gate/proto"
 
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
+	"gate/pkg/edition/java/proto/util"
 )
 
 type ArgumentPropertyCodec interface {

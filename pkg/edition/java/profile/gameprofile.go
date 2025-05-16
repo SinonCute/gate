@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"go.minekube.com/gate/pkg/util/uuid"
+	"gate/pkg/util/uuid"
 )
 
 // GameProfile is a Mojang game profile.

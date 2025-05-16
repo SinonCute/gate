@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -16,17 +15,16 @@ import (
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 
-	"go.minekube.com/gate/pkg/bridge"
-	"go.minekube.com/gate/pkg/edition"
-	bproxy "go.minekube.com/gate/pkg/edition/bedrock/proxy"
-	jconfig "go.minekube.com/gate/pkg/edition/java/config"
-	jproxy "go.minekube.com/gate/pkg/edition/java/proxy"
-	"go.minekube.com/gate/pkg/gate/config"
-	"go.minekube.com/gate/pkg/internal/reload"
-	"go.minekube.com/gate/pkg/runtime/process"
-	connectcfg "go.minekube.com/gate/pkg/util/connectutil/config"
-	errorsutil "go.minekube.com/gate/pkg/util/errs"
-	"go.minekube.com/gate/pkg/util/interrupt"
+	"gate/pkg/bridge"
+	"gate/pkg/edition"
+	bproxy "gate/pkg/edition/bedrock/proxy"
+	jconfig "gate/pkg/edition/java/config"
+	jproxy "gate/pkg/edition/java/proxy"
+	"gate/pkg/gate/config"
+	"gate/pkg/internal/reload"
+	"gate/pkg/runtime/process"
+	errorsutil "gate/pkg/util/errs"
+	"gate/pkg/util/interrupt"
 )
 
 // Options are Gate options.
@@ -36,6 +34,8 @@ type Options struct {
 	// The event manager to use.
 	// If none is set, no events are sent.
 	EventMgr event.Manager
+	// Dynamic config loader for runtime config updates
+	DynamicConfigLoader *DynamicConfigLoader
 }
 
 // New returns a new Gate instance.
@@ -44,37 +44,27 @@ func New(options Options) (gate *Gate, err error) {
 	if options.Config == nil {
 		return nil, errorsutil.ErrMissingConfig
 	}
-	if !options.Config.Editions.Java.Enabled && !options.Config.Editions.Bedrock.Enabled {
-		return nil, fmt.Errorf("no edition enabled, enable at least one Minecraft proxy edition")
-	}
-
-	// Require no config validation errors
-	warns, errs := options.Config.Validate()
-	if err = errors.Join(errs...); err != nil {
-		return nil, fmt.Errorf("config validation errors "+
-			"(errors: %d, warns: %d)", len(errs), len(warns))
+	if options.DynamicConfigLoader == nil {
+		return nil, fmt.Errorf("dynamic config loader is required")
 	}
 
 	eventMgr := options.EventMgr
 	if eventMgr == nil {
 		eventMgr = event.Nop
 	}
-	reload.Map(eventMgr, func(c *config.Config) *jconfig.Config {
-		return &c.Editions.Java.Config
-	})
-	reload.Map(eventMgr, func(c *config.Config) *connectcfg.Config {
-		return &c.Connect
-	})
 
 	gate = &Gate{
 		proc:   process.New(process.Options{AllOrNothing: true}),
 		bridge: &bridge.Bridge{},
+		loader: options.DynamicConfigLoader,
 	}
 
-	c := options.Config
-	if c.Editions.Java.Enabled {
+	// Setup Java proxy if enabled
+	if options.Config.Editions.Java.Enabled {
+		// Get current config from loader for proxy setup
+		_ = gate.loader.GetConfig() // Initial load, will be used by proxy logic
 		gate.bridge.JavaProxy, err = jproxy.New(jproxy.Options{
-			Config:   &c.Editions.Java.Config,
+			Config:   &options.Config.Editions.Java.Config,
 			EventMgr: eventMgr,
 		})
 		if err != nil {
@@ -87,9 +77,11 @@ func New(options Options) (gate *Gate, err error) {
 			return nil, err
 		}
 	}
-	if c.Editions.Bedrock.Enabled {
+
+	// Setup Bedrock proxy if enabled
+	if options.Config.Editions.Bedrock.Enabled {
 		gate.bridge.BedrockProxy, err = bproxy.New(bproxy.Options{
-			Config:   &c.Editions.Bedrock.Config,
+			Config:   &options.Config.Editions.Bedrock.Config,
 			EventMgr: eventMgr,
 		})
 		if err != nil {
@@ -103,19 +95,11 @@ func New(options Options) (gate *Gate, err error) {
 		}
 	}
 
-	if c.Editions.Bedrock.Enabled && c.Editions.Java.Enabled {
+	if options.Config.Editions.Bedrock.Enabled && options.Config.Editions.Java.Enabled {
 		// More than one edition was enabled, setup bridge between them
 		if err = gate.bridge.Setup(); err != nil {
 			return nil, fmt.Errorf("error setting up bridge between proxy editions: %w", err)
 		}
-	}
-
-	if err = setupConnect(gate.proc, c, eventMgr, gate.Java()); err != nil {
-		return nil, err
-	}
-
-	if err = gate.proc.Add(setupAPI(c, eventMgr, gate.Java())); err != nil {
-		return nil, err
 	}
 
 	return gate, nil
@@ -123,8 +107,9 @@ func New(options Options) (gate *Gate, err error) {
 
 // Gate is the root holder of various child processes.
 type Gate struct {
-	bridge *bridge.Bridge     // The proxies.
-	proc   process.Collection // Parallel running proc.
+	bridge *bridge.Bridge       // The proxies.
+	proc   process.Collection   // Parallel running proc.
+	loader *DynamicConfigLoader // Dynamic config loader
 }
 
 // Java returns the Java edition proxy, or nil if none.
@@ -150,6 +135,7 @@ type startOptions struct {
 	conf                      *config.Config
 	autoShutdownOnSignal      bool
 	autoConfigReloadWatchPath string
+	DynamicConfigLoader       *DynamicConfigLoader
 }
 
 // WithConfig is a StartOption for Start
@@ -184,6 +170,13 @@ func WithAutoConfigReload(path string) StartOption {
 	}
 }
 
+// WithDynamicConfigLoader is a StartOption for Start that sets the dynamic config loader.
+func WithDynamicConfigLoader(loader *DynamicConfigLoader) StartOption {
+	return func(o *startOptions) {
+		o.DynamicConfigLoader = loader
+	}
+}
+
 // Start is a convenience function to set up and run a Gate instance.
 //
 // It uses the logr.Logger from the provided context, reads in a Config,
@@ -200,26 +193,21 @@ func Start(ctx context.Context, opts ...StartOption) error {
 	for _, opt := range opts {
 		opt(c)
 	}
-	if c.conf == nil {
-		cfg, err := LoadConfig(Viper)
-		if err != nil {
-			return err
-		}
-		c.conf = cfg
-	}
 
 	log := logr.FromContextOrDiscard(ctx)
-	configLog := log.WithName("config")
 
-	// Validate Gate config
-	if err := validateConfig(configLog, c.conf); err != nil {
-		return err
+	// Require dynamic config loader
+	if c.DynamicConfigLoader == nil {
+		return fmt.Errorf("dynamic config loader is required")
 	}
+
+	// Get initial config from loader
+	_ = c.DynamicConfigLoader.GetConfig() // Initial load, will be used by proxy logic
 
 	// Setup new Gate instance with loaded config.
 	eventMgr := event.New(event.WithLogger(log.WithName("event")))
 	gate, err := New(Options{
-		Config:   c.conf,
+		Config:   c.conf, // This will be used only for static config (DB/Redis)
 		EventMgr: eventMgr,
 	})
 	if err != nil {
@@ -238,15 +226,6 @@ func Start(ctx context.Context, opts ...StartOption) error {
 				log.Info("Received os signal", "signal", s)
 			}
 		}()
-	}
-
-	// Setup auto config reload if enabled.
-	err = setupAutoConfigReload(
-		ctx, configLog, eventMgr,
-		c.autoConfigReloadWatchPath, c.conf,
-	)
-	if err != nil {
-		return fmt.Errorf("error setting up auto config reload: %w", err)
 	}
 
 	// Start everything

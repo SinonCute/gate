@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/lite"
-	"go.minekube.com/gate/pkg/edition/java/proto/state"
 	"net"
 	"reflect"
 	"strings"
@@ -13,30 +11,30 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gate/pkg/edition/java/config"
+	"gate/pkg/edition/java/internal/addrquota"
+	"gate/pkg/edition/java/internal/reload"
+	"gate/pkg/edition/java/lite"
+	"gate/pkg/edition/java/netmc"
+	"gate/pkg/edition/java/proto/state"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/errs"
+	"gate/pkg/util/netutil"
+	"gate/pkg/util/uuid"
+
 	"github.com/go-logr/logr"
 	"github.com/pires/go-proxyproto"
 	"github.com/robinbraemer/event"
 	"go.minekube.com/common/minecraft/component"
 	"go.minekube.com/common/minecraft/component/codec/legacy"
-	"go.minekube.com/gate/pkg/command"
-	"go.minekube.com/gate/pkg/edition/java/config"
-	"go.minekube.com/gate/pkg/edition/java/netmc"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/internal/addrquota"
-	"go.minekube.com/gate/pkg/internal/connwrap"
-	"go.minekube.com/gate/pkg/internal/reload"
-	"go.minekube.com/gate/pkg/util/errs"
-	"go.minekube.com/gate/pkg/util/netutil"
-	"go.minekube.com/gate/pkg/util/uuid"
 	"golang.org/x/sync/errgroup"
 )
 
 // Proxy is Gate's Java edition Minecraft proxy.
 type Proxy struct {
-	log     logr.Logger
-	cfg     *config.Config
-	event   event.Manager
-	command command.Manager
+	log   logr.Logger
+	cfg   *config.Config
+	event event.Manager
 
 	startTime atomic.Pointer[time.Time]
 
@@ -129,10 +127,6 @@ func (p *Proxy) Start(ctx context.Context) error {
 	defer p.cancelStart()
 	p.closeMu.Unlock()
 
-	if err := p.init(); err != nil {
-		return fmt.Errorf("pre-initialization error: %w", err)
-	}
-
 	logInfo := func() {
 		if p.cfg.Debug {
 			p.log.Info("running in debug mode")
@@ -174,9 +168,6 @@ func (p *Proxy) Start(ctx context.Context) error {
 			stopLn()
 			stopLn = listen(e.Config.Bind)
 			p.closeMu.Unlock()
-		}
-		if err := p.init(); err != nil {
-			p.log.Error(err, "re-initialization error")
 		}
 		if e.Config.Lite.Enabled {
 			// reset whole cache if routes have changed because
@@ -228,10 +219,6 @@ func (p *Proxy) Shutdown(reason component.Component) {
 			"totalTime", time.Since(*p.startTime.Load()).Round(time.Millisecond).String())
 	}()
 
-	pre := &PreShutdownEvent{reason: reason}
-	p.event.Fire(pre)
-	reason = pre.Reason()
-
 	reasonStr := new(strings.Builder)
 	if reason != nil && !reflect.ValueOf(reason).IsNil() {
 		err := (&legacy.Legacy{}).Marshal(reasonStr, reason)
@@ -246,31 +233,7 @@ func (p *Proxy) Shutdown(reason component.Component) {
 	p.log.Info("disconnected all players.", "time", time.Since(disconnectTime).String())
 
 	p.log.Info("waiting for all event handlers to complete...")
-	p.event.Fire(&ShutdownEvent{})
 	p.event.Wait()
-}
-
-// called before starting to actually run the proxy
-func (p *Proxy) init() (err error) {
-	c := p.cfg
-
-	// Register builtin commands
-	if c.BuiltinCommands {
-		names := p.registerBuiltinCommands()
-		p.log.Info("registered builtin commands", "count", len(names), "cmds", names)
-	}
-
-	return nil
-}
-
-// Event returns the Proxy's event manager.
-func (p *Proxy) Event() event.Manager {
-	return p.event
-}
-
-// Command returns the Proxy's command manager.
-func (p *Proxy) Command() *command.Manager {
-	return &p.command
 }
 
 // Config returns the cfg used by the Proxy.
@@ -317,8 +280,6 @@ func (p *Proxy) listenAndServe(ctx context.Context, addr string) error {
 	defer cancel()
 	go func() { <-ctx.Done(); _ = ln.Close() }()
 
-	p.event.Fire(&ReadyEvent{addr: addr})
-
 	defer p.log.Info("stopped listening for new connections", "addr", addr)
 	p.log.Info("listening for connections", "addr", addr)
 
@@ -348,22 +309,6 @@ func (p *Proxy) HandleConn(raw net.Conn) {
 		p.log.Info("connection exceeded rate limit, closed", "remoteAddr", raw.RemoteAddr())
 		_ = raw.Close()
 		return
-	}
-
-	// Fire connection event
-	if p.event.HasSubscriber((*ConnectionEvent)(nil)) {
-		conn := &connwrap.Conn{Conn: raw}
-		e := &ConnectionEvent{
-			conn:     conn,
-			original: conn,
-		}
-		p.event.Fire(e)
-		if conn.Closed() || e.Connection() == nil {
-			_ = conn.Close()
-			p.log.V(1).Info("connection closed by ConnectionEvent subscriber", "remoteAddr", raw.RemoteAddr())
-			return
-		}
-		raw = e.Connection()
 	}
 
 	// Create context for connection
@@ -509,27 +454,6 @@ func (p *Proxy) unregisterConnection(player *connectedPlayer) (found bool) {
 //
 //
 //
-
-// MessageSink is a message sink.
-type MessageSink interface {
-	// SendMessage sends a message component to the entity.
-	SendMessage(msg component.Component, opts ...command.MessageOption) error
-}
-
-// BroadcastMessage broadcasts a message to all given sinks (e.g. Player).
-func BroadcastMessage(sinks []MessageSink, msg component.Component) {
-	for _, sink := range sinks {
-		go func(s MessageSink) { _ = s.SendMessage(msg) }(sink)
-	}
-}
-
-//
-//
-//
-
-func withConnectionTimeout(parent context.Context, cfg *config.Config) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, time.Duration(cfg.ConnectionTimeout)*time.Millisecond)
-}
 
 type (
 	configProvider interface {

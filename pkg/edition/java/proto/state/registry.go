@@ -2,9 +2,9 @@ package state
 
 import (
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/gate/proto"
+	"gate/pkg/edition/java/proto/state/states"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/gate/proto"
 	"reflect"
 )
 

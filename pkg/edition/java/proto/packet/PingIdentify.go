@@ -1,8 +1,8 @@
 package packet
 
 import (
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/gate/proto"
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/gate/proto"
 	"io"
 )
 

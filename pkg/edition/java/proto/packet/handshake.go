@@ -2,11 +2,12 @@ package packet
 
 import (
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
 	"io"
 
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
-	"go.minekube.com/gate/pkg/gate/proto"
+	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
+
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/gate/proto"
 )
 
 // HandshakeIntent represents the client intent in the Handshake state.

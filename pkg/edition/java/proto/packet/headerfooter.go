@@ -1,12 +1,13 @@
 package packet
 
 import (
-	"go.minekube.com/common/minecraft/component"
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/chat"
 	"io"
 
-	"go.minekube.com/gate/pkg/edition/java/proto/packet/tablist/legacytablist"
-	"go.minekube.com/gate/pkg/gate/proto"
+	"go.minekube.com/common/minecraft/component"
+	"go.minekube.com/gate/pkg/edition/java/proto/packet/chat"
+
+	"gate/pkg/edition/java/proto/packet/tablist/legacytablist"
+	"gate/pkg/gate/proto"
 )
 
 type HeaderAndFooter struct {

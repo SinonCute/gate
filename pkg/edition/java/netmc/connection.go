@@ -6,21 +6,22 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
-	"go.minekube.com/gate/pkg/edition/java/proto/util/queue"
+	"gate/pkg/edition/java/proto/state/states"
+	"gate/pkg/edition/java/proto/util/queue"
 	"net"
 	"sync"
 	"time"
 
+	"gate/pkg/edition/java/proxy/phase"
+
 	"github.com/go-logr/logr"
-	"go.minekube.com/gate/pkg/edition/java/proxy/phase"
 	"go.uber.org/atomic"
 
-	"go.minekube.com/gate/pkg/edition/java/proto/packet"
-	"go.minekube.com/gate/pkg/edition/java/proto/state"
-	"go.minekube.com/gate/pkg/edition/java/proto/version"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/util/errs"
+	"gate/pkg/edition/java/proto/packet"
+	"gate/pkg/edition/java/proto/state"
+	"gate/pkg/edition/java/proto/version"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/errs"
 )
 
 // MinecraftConn is a Minecraft connection of a client or server.

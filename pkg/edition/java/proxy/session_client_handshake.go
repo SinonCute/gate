@@ -2,21 +2,23 @@ package proxy
 
 import (
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
 	"net"
 	"time"
+
+	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
+
+	"gate/pkg/edition/java/config"
+	"gate/pkg/edition/java/internal/addrquota"
+	"gate/pkg/edition/java/lite"
+	"gate/pkg/edition/java/netmc"
+	"gate/pkg/edition/java/proto/packet"
+	"gate/pkg/edition/java/proto/state"
+	"gate/pkg/gate/proto"
+	"gate/pkg/util/netutil"
 
 	"github.com/go-logr/logr"
 	"github.com/robinbraemer/event"
 	"go.minekube.com/common/minecraft/component"
-	"go.minekube.com/gate/pkg/edition/java/config"
-	"go.minekube.com/gate/pkg/edition/java/lite"
-	"go.minekube.com/gate/pkg/edition/java/netmc"
-	"go.minekube.com/gate/pkg/edition/java/proto/packet"
-	"go.minekube.com/gate/pkg/edition/java/proto/state"
-	"go.minekube.com/gate/pkg/gate/proto"
-	"go.minekube.com/gate/pkg/internal/addrquota"
-	"go.minekube.com/gate/pkg/util/netutil"
 )
 
 type sessionHandlerDeps struct {

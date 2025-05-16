@@ -2,12 +2,13 @@ package ping
 
 import (
 	"encoding/json"
-	"go.minekube.com/gate/pkg/edition/java/proto/util"
 	"testing"
+
+	"gate/pkg/edition/java/proto/util"
+	"gate/pkg/util/uuid"
 
 	"github.com/stretchr/testify/require"
 	"go.minekube.com/common/minecraft/component"
-	"go.minekube.com/gate/pkg/util/uuid"
 )
 
 func TestServerPing_JSON(t *testing.T) {
